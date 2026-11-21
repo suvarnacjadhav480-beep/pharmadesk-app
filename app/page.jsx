@@ -416,7 +416,8 @@ export default function App() {
                 { id: 'pos', icon: ShoppingCart, label: 'POS Terminal' },
                 { id: 'patients', icon: Users, label: 'Patient Queue' },
                 { id: 'doctors', icon: Stethoscope, label: 'Doctors & Rx' },
-                { id: 'inventory', icon: Package, label: 'Inventory Graph' }
+                { id: 'inventory', icon: Package, label: 'Inventory Graph' },
+                { id: 'ds_inspector', icon: Layers, label: 'DS Visualizer' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -704,28 +705,76 @@ export default function App() {
           </div>
         )}
 
-        {/* --- TAB 4: INVENTORY / GRAPH --- */}
-        {activeTab === 'inventory' && (
-          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900 mb-4 flex items-center"><Network className="w-4 h-4 mr-2 text-teal-600" /> Generic Substitute Graph</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {Object.entries(genericGraphData).map(([salt, meds]) => (
-                <div key={salt} className="border border-slate-200 rounded-xl p-4 bg-slate-50 relative overflow-hidden">
-                  <div className="absolute top-0 right-0 p-3 opacity-10">
-                    <Network className="w-16 h-16 text-teal-900" />
-                  </div>
-                  <h4 className="font-bold text-slate-900 text-sm mb-3">Salt: {salt}</h4>
-                  <div className="space-y-2 relative z-10">
-                    {meds.map(m => (
-                      <div key={m.id} className="flex justify-between items-center bg-white p-2 rounded border border-slate-200 shadow-sm text-xs">
-                        <span className="font-semibold">{m.name}</span>
-                        <span className="font-mono text-slate-500">₹{m.price.toFixed(2)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ))}
+        {/* --- TAB 5: DS VISUALIZER --- */}
+        {activeTab === 'ds_inspector' && (
+          <div className="bg-slate-900 rounded-2xl p-6 shadow-xl flex flex-col gap-8">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-4">
+              <h3 className="text-lg font-bold text-white flex items-center"><Activity className="w-5 h-5 mr-2 text-teal-400" /> Live Data Structures Memory View</h3>
             </div>
+
+            {/* Stack Visualizer */}
+            <div>
+              <h4 className="text-sm font-semibold text-teal-400 mb-3 uppercase tracking-wider">Cart Stack Memory (LIFO)</h4>
+              <div className="flex items-end space-x-2 bg-slate-800 p-6 rounded-xl border border-slate-700 overflow-x-auto min-h-[160px]">
+                {cartStack.length > 0 ? cartStack.map((item, i) => (
+                  <div key={item.cartId} className={`flex-shrink-0 w-32 p-4 rounded-xl border flex flex-col items-center justify-center text-center transition-all ${i === cartStack.length - 1 ? 'bg-teal-500/20 border-teal-400 animate-pulse' : 'bg-slate-700 border-slate-600'}`}>
+                    <span className="text-xs font-mono text-slate-300 mb-2">Index: {i}</span>
+                    <span className="text-sm font-bold text-white truncate w-full">{item.medicine.name}</span>
+                    {i === cartStack.length - 1 && <span className="mt-2 text-[10px] bg-teal-500 text-white px-2 py-0.5 rounded font-bold">TOP (SP)</span>}
+                  </div>
+                )) : (
+                  <div className="text-slate-500 text-sm italic w-full text-center">Stack is empty. Add items in POS to push.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Queue Visualizer */}
+            <div>
+              <h4 className="text-sm font-semibold text-amber-400 mb-3 uppercase tracking-wider">Patient Queue (FIFO)</h4>
+              <div className="flex items-center space-x-2 bg-slate-800 p-6 rounded-xl border border-slate-700 overflow-x-auto min-h-[160px]">
+                {patientQueue.length > 0 ? patientQueue.map((id, i) => {
+                  const p = patients.find(pat => pat.id === id);
+                  return (
+                  <div key={id} className={`flex-shrink-0 flex items-center`}>
+                    <div className={`w-32 p-4 rounded-xl border flex flex-col items-center justify-center text-center ${i === 0 ? 'bg-amber-500/20 border-amber-400' : i === patientQueue.length - 1 ? 'bg-blue-500/20 border-blue-400' : 'bg-slate-700 border-slate-600'}`}>
+                      <span className="text-sm font-bold text-white truncate w-full">{p?.name}</span>
+                      {i === 0 && <span className="mt-2 text-[10px] bg-amber-500 text-slate-900 px-2 py-0.5 rounded font-bold">FRONT</span>}
+                      {i === patientQueue.length - 1 && patientQueue.length > 1 && <span className="mt-2 text-[10px] bg-blue-500 text-white px-2 py-0.5 rounded font-bold">REAR</span>}
+                    </div>
+                    {i < patientQueue.length - 1 && <div className="w-8 h-0.5 bg-slate-600 mx-2"></div>}
+                  </div>
+                )}) : (
+                  <div className="text-slate-500 text-sm italic w-full text-center">Queue is empty. Register patients to enqueue.</div>
+                )}
+              </div>
+            </div>
+
+            {/* Trie Visualizer */}
+            <div>
+              <h4 className="text-sm font-semibold text-emerald-400 mb-3 uppercase tracking-wider">Trie Search Prefix Path</h4>
+              <div className="flex items-center bg-slate-800 p-6 rounded-xl border border-slate-700 min-h-[120px]">
+                {searchTerm.length > 0 ? (
+                  <div className="flex items-center flex-wrap gap-2">
+                    <div className="w-10 h-10 rounded-full bg-slate-700 border border-slate-600 flex items-center justify-center text-slate-400 font-bold">root</div>
+                    {searchTerm.split('').map((char, i) => (
+                      <React.Fragment key={i}>
+                        <div className="w-6 h-0.5 bg-emerald-500/50"></div>
+                        <div className="w-10 h-10 rounded-full bg-emerald-500/20 border border-emerald-400 flex items-center justify-center text-emerald-400 font-bold uppercase shadow-[0_0_10px_rgba(16,185,129,0.2)]">
+                          {char}
+                        </div>
+                      </React.Fragment>
+                    ))}
+                    <div className="w-6 h-0.5 bg-emerald-500/50 border-dashed"></div>
+                    <div className="px-3 py-1.5 rounded-lg bg-emerald-900/50 border border-emerald-700 text-emerald-300 text-xs">
+                      {searchSuggestions.length} node(s) found
+                    </div>
+                  </div>
+                ) : (
+                  <div className="text-slate-500 text-sm italic w-full text-center">Type in POS Search to visualize O(k) Trie traversal.</div>
+                )}
+              </div>
+            </div>
+
           </div>
         )}
       </main>
@@ -825,7 +874,7 @@ export default function App() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl border border-slate-200">
             <h3 className="text-base font-bold mb-4">Generate Prescription</h3>
-            <form onSubmit={handleCreateRx} className="space-y-3">
+            <form onSubmit={handleCreatePrescription} className="space-y-3">
               {/* Dummy Rx Form logic placeholder since real UI would take too many lines, minimal version: */}
               <select required value={newRx.patientId} onChange={e => setNewRx({...newRx, patientId: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-xl text-xs">
                 <option value="">Select Patient...</option>
