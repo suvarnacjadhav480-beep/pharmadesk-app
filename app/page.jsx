@@ -3,41 +3,27 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Search, ShoppingCart, Undo2, CheckCircle2, Package, Clock, Plus,
-  Activity, UserPlus, Stethoscope, FileText, Building2, ClipboardList,
-  BadgeCheck, ShieldCheck, Layers, Users, AlertCircle, Network,
-  History, ArrowUpDown, SearchCode, GitMerge, LayoutDashboard,
-  TrendingUp, AlertOctagon, Pill, Waypoints, Workflow, Database, Hexagon, Hash
+  Activity, UserPlus, Stethoscope, Building2,
+  BadgeCheck, Layers, Users, History, ArrowUpDown, SearchCode,
+  GitMerge, LayoutDashboard, TrendingUp, AlertOctagon, Pill,
+  Waypoints, Workflow, Database, Hash
 } from 'lucide-react';
 
 // ==========================================
 // 1. ADVANCED DATA STRUCTURE ALGORITHMS
 // ==========================================
 
-// --- 1. Bloom Filter (Probabilistic Search) O(1) ---
-class BloomFilter {
-  constructor(size = 100) {
-    this.size = size;
-    this.bitArray = new Array(size).fill(0);
+// --- 1. Graph (Adjacency List for Drug Interactions) O(V + E) ---
+class Graph {
+  constructor() { this.adjList = new Map(); }
+  addVertex(v) { if (!this.adjList.has(v)) this.adjList.set(v, []); }
+  addEdge(v, w) {
+    if (!this.adjList.has(v)) this.addVertex(v);
+    if (!this.adjList.has(w)) this.addVertex(w);
+    if (!this.adjList.get(v).includes(w)) this.adjList.get(v).push(w);
+    if (!this.adjList.get(w).includes(v)) this.adjList.get(w).push(v);
   }
-  hash1(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) hash = (hash + str.charCodeAt(i) * 31) % this.size;
-    return hash;
-  }
-  hash2(str) {
-    let hash = 0;
-    for (let i = 0; i < str.length; i++) hash = (hash + str.charCodeAt(i) * 17) % this.size;
-    return hash;
-  }
-  insert(str) {
-    const s = str.toLowerCase();
-    this.bitArray[this.hash1(s)] = 1;
-    this.bitArray[this.hash2(s)] = 1;
-  }
-  mightContain(str) {
-    const s = str.toLowerCase();
-    return this.bitArray[this.hash1(s)] === 1 && this.bitArray[this.hash2(s)] === 1;
-  }
+  getInteractions(v) { return this.adjList.get(v) || []; }
 }
 
 // --- 2. Custom Hash Map (Separate Chaining) O(1) ---
@@ -207,7 +193,7 @@ class PatientBST {
   }
   searchByName(name) {
     let curr = this.root;
-    const target = name.toLowerCase();
+    const target = name.toLowerCase().trim();
     while (curr) {
       const currName = curr.patient.name.toLowerCase();
       if (currName === target) return curr.patient;
@@ -292,12 +278,12 @@ export default function App() {
   const [searchSuggestions, setSearchSuggestions] = useState([]);
   
   // DS Refs
-  const bloomRef = useRef(new BloomFilter(200));
   const trieRef = useRef(new Trie());
   const lruRef = useRef(new LRUCache(5));
   const bstRef = useRef(new PatientBST());
   const hashMapRef = useRef(new CustomHashMap(50));
   const logBufferRef = useRef(new CircularBuffer(20)); 
+  const graphRef = useRef(new Graph());
   
   // Operational States
   const [recentItems, setRecentItems] = useState([]);
@@ -311,9 +297,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
   const [dsLogs, setDsLogs] = useState([]);
   const [metrics, setMetrics] = useState({ revenue: 0, orders: 0 });
+  const [alertMessage, setAlertMessage] = useState(null);
   
   // Modals & UI States
-  const [substituteModal, setSubstituteModal] = useState(null);
   const [showAddPatientModal, setShowAddPatientModal] = useState(false);
   const [showCreateRxModal, setShowCreateRxModal] = useState(false);
   const [bstSearchName, setBstSearchName] = useState('');
@@ -322,32 +308,38 @@ export default function App() {
   const [newPatient, setNewPatient] = useState({ name: '', age: '', gender: 'Female', type: 'Walk-in', allergies: '' });
   const [newRx, setNewRx] = useState({ patientId: '', doctorId: '', medId: '', dosage: '1-0-1', duration: '5 days' });
 
-  // --- INIT TRIE & BLOOM FILTER ---
+  const [showAddMedicineModal, setShowAddMedicineModal] = useState(false);
+  const [showAddDoctorModal, setShowAddDoctorModal] = useState(false);
+  const [newMedicineForm, setNewMedicineForm] = useState({ name: '', category: '', activeSalt: '', price: '', batchId: '', expiryDate: '', quantity: '' });
+  const [newDoctorForm, setNewDoctorForm] = useState({ name: '', specialty: '', qualification: '', license: '', hospital: '' });
+
+  // --- INIT TRIE & GRAPH ---
   useEffect(() => {
     const newTrie = new Trie();
-    const newBloom = new BloomFilter(200);
+    const newGraph = new Graph();
+
     inventory.forEach(med => {
       newTrie.insert(med);
-      newBloom.insert(med.name);
+      newGraph.addVertex(med.id);
     });
+    
+    // Add known contraindications (Drug Interactions)
+    newGraph.addEdge("MED-103", "MED-101"); // Lipitor <-> Amoxicillin
+    newGraph.addEdge("MED-107", "MED-105"); // Aspirin <-> Paracetamol
+    newGraph.addEdge("MED-104", "MED-102"); // Atorva <-> Moxikind
+
     trieRef.current = newTrie;
-    bloomRef.current = newBloom;
+    graphRef.current = newGraph;
   }, [inventory]);
 
-  // --- TRIE AUTOCOMPLETE + BLOOM O(k) ---
+  // --- TRIE AUTOCOMPLETE O(k) ---
   useEffect(() => {
     if (searchTerm.trim() === '') {
       setSearchSuggestions([]);
       return;
     }
-    // Bloom Filter check first (Probabilistic)
-    if (bloomRef.current.mightContain(searchTerm)) {
-      addDsLog('BLOOM_FILTER', `Bloom check positive for "${searchTerm}". Proceeding to Trie.`, 'O(1)');
-      setSearchSuggestions(trieRef.current.search(searchTerm));
-    } else {
-      // If Bloom says false, it's definitely false. We still search Trie for prefix matches.
-      setSearchSuggestions(trieRef.current.search(searchTerm));
-    }
+    addDsLog('TRIE_SEARCH', `Traversing Trie for prefix "${searchTerm}"`, 'O(k)');
+    setSearchSuggestions(trieRef.current.search(searchTerm));
   }, [searchTerm]);
 
   // --- RING BUFFER AUDIT LOGGING O(1) ---
@@ -383,12 +375,11 @@ export default function App() {
     const earliestBatch = heap.peekMin();
 
     if (!earliestBatch || earliestBatch.quantity <= 0) {
-      setSubstituteModal(medicine);
-      addDsLog('GRAPH_TRAVERSAL', `Stockout for "${medicine.name}". Generating Adjacency List for substitutes.`, 'O(V + E)');
+      setAlertMessage(`Stockout for "${medicine.name}". Please restock inventory.`);
       return;
     }
 
-    const cartItem = { cartId: `CART-${Date.now()}`, medicine, fefoBatch: earliestBatch, qty: 1, subtotal: medicine.price };
+    const cartItem = { cartId: `CART-${Date.now()}-${Math.random()}`, medicine, fefoBatch: earliestBatch, qty: 1, subtotal: medicine.price };
     setCartStack(prev => [...prev, cartItem]);
     setSearchTerm('');
     addDsLog('STACK_PUSH', `Push "${medicine.name}" to Cart (SP: ${cartStack.length + 1})`, 'O(1)');
@@ -476,26 +467,47 @@ export default function App() {
 
   const handleBstSearch = () => {
     if(!bstSearchName) return;
-    // Explicitly searching by Name using the BST
     const res = bstRef.current.searchByName(bstSearchName);
     setBstSearchResult(res);
     addDsLog('BST_SEARCH', `Traversed Tree for exact Name "${bstSearchName}". Found: ${res ? 'Yes' : 'No'}`, 'O(log N)');
   };
 
-  // --- DAG (Directed Acyclic Graph) for Rx ---
+  // --- DAG (Directed Acyclic Graph) for Rx & Graph Interactions ---
   const handleCreatePrescription = (e) => {
     e.preventDefault();
-    // Use Hash Map for O(1) patient lookup instead of Array.find()
     const patientObj = hashMapRef.current.get(newRx.patientId) || patients.find(p => p.id === newRx.patientId);
-    if (!patientObj) return;
+    const doctorObj = doctors.find(d => d.id === newRx.doctorId);
+    const medObj = inventory.find(m => m.id === newRx.medId);
+    if (!patientObj || !doctorObj || !medObj) return;
+
+    // Check for Drug Interactions via Graph O(V)
+    const activePatientRxs = prescriptions.filter(r => r.patientId === patientObj.id && r.status !== 'Completed');
+    const interactions = graphRef.current.getInteractions(newRx.medId);
+    const conflict = activePatientRxs.find(r => interactions.includes(r.medId));
+
+    if (conflict) {
+      const medName1 = medObj.name;
+      const medName2 = inventory.find(m => m.id === conflict.medId)?.name;
+      setAlertMessage(`SEVERE DRUG INTERACTION DETECTED! Cannot prescribe ${medName1} while patient is actively taking ${medName2}. (Graph Edge Traversed)`);
+      addDsLog('GRAPH_TRAVERSAL', `Blocked Rx! Interaction between ${newRx.medId} & ${conflict.medId}`, 'O(V)');
+      return;
+    }
+
     const rxId = `RX-${900 + prescriptions.length + 1}`;
     const rxObject = {
-      id: rxId, patientName: patientObj.name, medId: newRx.medId, 
+      id: rxId, 
+      patientId: patientObj.id, 
+      patientName: patientObj.name, 
+      doctorName: doctorObj.name,
+      medId: medObj.id, 
+      medName: medObj.name,
+      dosage: newRx.dosage,
       status: 'Pending', 
       date: new Date().toLocaleTimeString()
     };
     setPrescriptions(prev => [rxObject, ...prev]);
     setShowCreateRxModal(false);
+    setNewRx({ patientId: '', doctorId: '', medId: '', dosage: '1-0-1', duration: '5 days' });
     addDsLog('DAG_NODE_CREATED', `Rx ${rxId} entering Directed Acyclic Workflow`, 'O(1)');
   };
 
@@ -505,26 +517,113 @@ export default function App() {
     addDsLog('DAG_EDGE_TRAVERSED', `Rx ${rxId}: ${currentState} -> ${nextState}`, 'O(1)');
   };
 
-  const genericGraphData = useMemo(() => {
-    const saltMap = {};
-    inventory.forEach(med => {
-      if (!saltMap[med.activeSalt]) saltMap[med.activeSalt] = [];
-      saltMap[med.activeSalt].push(med);
-    });
-    return saltMap;
+  const handleAddMedicine = (e) => {
+    e.preventDefault();
+    const medId = `MED-${Math.floor(Math.random() * 900) + 100}`;
+    const med = {
+      id: medId,
+      name: newMedicineForm.name,
+      category: newMedicineForm.category,
+      activeSalt: newMedicineForm.activeSalt,
+      price: parseFloat(newMedicineForm.price) || 0,
+      batches: [{
+        batchId: newMedicineForm.batchId || `B-${medId}`,
+        expiryDate: newMedicineForm.expiryDate || '2030-01-01',
+        quantity: parseInt(newMedicineForm.quantity) || 0
+      }]
+    };
+    setInventory(prev => [...prev, med]);
+    setShowAddMedicineModal(false);
+    addDsLog('ARRAY_INSERT', `Added new medicine "${med.name}" to catalog`, 'O(1)');
+    setNewMedicineForm({ name: '', category: '', activeSalt: '', price: '', batchId: '', expiryDate: '', quantity: '' });
+  };
+
+  const handleAddDoctor = (e) => {
+    e.preventDefault();
+    const docId = `DOC-${Math.floor(Math.random() * 900) + 100}`;
+    const doc = {
+      id: docId,
+      name: newDoctorForm.name,
+      specialty: newDoctorForm.specialty,
+      qualification: newDoctorForm.qualification,
+      license: newDoctorForm.license,
+      hospital: newDoctorForm.hospital,
+      certified: true
+    };
+    setDoctors(prev => [...prev, doc]);
+    setShowAddDoctorModal(false);
+    addDsLog('ARRAY_INSERT', `Registered new doctor "${doc.name}"`, 'O(1)');
+    setNewDoctorForm({ name: '', specialty: '', qualification: '', license: '', hospital: '' });
+  };
+
+  // --- COMPUTED METRICS & GLOBAL HEAP ---
+  const totalCartCost = useMemo(() => cartStack.reduce((sum, item) => sum + item.subtotal, 0), [cartStack]);
+
+  const lowStockItems = useMemo(() => {
+    return inventory.filter(med => med.batches.reduce((sum, b) => sum + b.quantity, 0) < 15);
   }, [inventory]);
 
-  const totalCartCost = cartStack.reduce((sum, item) => sum + item.subtotal, 0);
-  const lowStockItems = inventory.filter(m => m.batches.reduce((sum,b)=>sum+b.quantity,0) < 10);
+  const globalHeap = useMemo(() => {
+    const heap = new MinHeap();
+    inventory.forEach(med => {
+      med.batches.forEach(batch => {
+        if (batch.quantity > 0) {
+          heap.insert({ ...batch, medName: med.name });
+        }
+      });
+    });
+    return heap.getArray();
+  }, [inventory]);
 
-  // Helper for BST Visualizer Recursion
+  // --- VISUALIZER RECURSIVE HELPERS ---
+  const renderTrieNode = (node, char = 'ROOT', path = '') => {
+    if (!node) return null;
+    const childKeys = Object.keys(node.children);
+    return (
+      <div key={path || 'root'} className="pl-4 border-l border-teal-500/30 ml-2 my-1">
+        <div className="inline-flex items-center px-2 py-0.5 rounded bg-teal-950/80 border border-teal-500/50 text-teal-200 font-mono text-[10px]">
+          <span className="font-bold">{char.toUpperCase()}</span>
+          {node.isEndOfWord && <span className="ml-1.5 text-[8px] bg-amber-500/20 text-amber-300 px-1 rounded">★ {node.medicines[0]?.name}</span>}
+        </div>
+        {childKeys.length > 0 && (
+          <div className="mt-1">
+            {childKeys.sort().map(k => renderTrieNode(node.children[k], k, path + k))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderHeapNode = (heapArr, idx = 0) => {
+    if (!heapArr || idx >= heapArr.length) return null;
+    const item = heapArr[idx];
+    const leftIdx = 2 * idx + 1;
+    const rightIdx = 2 * idx + 2;
+    return (
+      <div key={idx} className="pl-4 border-l border-rose-500/30 ml-2 my-1.5">
+        <div className={`inline-flex items-center space-x-2 px-2.5 py-1 rounded-lg border font-mono text-[10px] ${idx === 0 ? 'bg-rose-900/60 border-rose-400 text-white shadow-md' : 'bg-slate-800/80 border-slate-600 text-slate-300'}`}>
+          <span className="text-[9px] text-rose-400 font-bold">[{idx}]</span>
+          <span className="font-bold">{item.medName}</span>
+          <span className="text-amber-300">Exp: {item.expiryDate}</span>
+          <span className="text-slate-400">({item.quantity})</span>
+        </div>
+        {(leftIdx < heapArr.length || rightIdx < heapArr.length) && (
+          <div className="mt-1">
+            {renderHeapNode(heapArr, leftIdx)}
+            {renderHeapNode(heapArr, rightIdx)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderBstNode = (node) => {
     if (!node) return null;
     return (
       <div className="pl-6 border-l-2 border-emerald-500/30 ml-3 my-2 relative">
         <div className="absolute w-6 h-0.5 bg-emerald-500/30 -left-0.5 top-3"></div>
         <div className="bg-emerald-900/50 border border-emerald-500 rounded-lg p-2 text-white text-xs font-bold inline-block shadow-lg">
-          {node.patient.name}
+          {node.patient.name} <span className="text-[9px] font-mono text-emerald-300 ml-1">({node.patient.id})</span>
         </div>
         {(node.left || node.right) && (
           <div className="mt-1">
@@ -548,10 +647,10 @@ export default function App() {
               </div>
               <div className="ml-3 flex flex-col">
                 <h1 className="text-xl font-extrabold text-slate-900 tracking-tight leading-tight">PharmaDesk Pro</h1>
-                <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest bg-teal-50 px-1.5 py-0.5 rounded-md inline-block w-max border border-teal-100">12 DS Integration Engine</span>
+                <span className="text-[10px] font-bold text-teal-600 uppercase tracking-widest bg-teal-50 px-1.5 py-0.5 rounded-md inline-block w-max border border-teal-100">11 DS Integration Engine</span>
               </div>
             </div>
-            <nav className="flex space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200/60 shadow-inner overflow-x-auto custom-scrollbar max-w-full">
+            <nav className="flex space-x-1 bg-slate-100 p-1 rounded-xl border border-slate-200/60 shadow-inner overflow-x-auto max-w-full">
               {[
                 { id: 'dashboard', icon: LayoutDashboard, label: 'Metrics' },
                 { id: 'pos', icon: ShoppingCart, label: 'POS Terminal' },
@@ -561,7 +660,7 @@ export default function App() {
               ].map(tab => (
                 <button
                   key={tab.id} onClick={() => setActiveTab(tab.id)}
-                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+                  className={`flex items-center px-4 py-2 rounded-lg text-sm font-bold transition-all whitespace-nowrap ${
                     activeTab === tab.id ? 'bg-white text-teal-700 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-200/50'
                   } ${tab.highlight ? 'bg-slate-900 !text-teal-400 hover:!bg-slate-800' : ''}`}
                 >
@@ -573,11 +672,24 @@ export default function App() {
         </div>
       </header>
 
+      {/* CUSTOM ALERT BANNER */}
+      {alertMessage && (
+        <div className="max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 pt-4">
+          <div className="bg-rose-600 text-white px-5 py-3.5 rounded-2xl shadow-lg flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <AlertOctagon className="w-5 h-5 shrink-0" />
+              <span className="text-xs sm:text-sm font-bold">{alertMessage}</span>
+            </div>
+            <button onClick={() => setAlertMessage(null)} className="text-xs font-black uppercase bg-rose-800 hover:bg-rose-900 px-3 py-1 rounded-lg ml-4">Dismiss</button>
+          </div>
+        </div>
+      )}
+
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 flex flex-col gap-6 relative">
         
         {/* --- TAB 1: DASHBOARD --- */}
         {activeTab === 'dashboard' && (
-          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="space-y-6">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center space-x-4">
                 <div className="w-14 h-14 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center"><TrendingUp className="w-7 h-7" /></div>
@@ -593,7 +705,7 @@ export default function App() {
               </div>
               <div className="bg-slate-900 p-6 rounded-2xl shadow-sm flex flex-col justify-center">
                  <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-1">Active DS Engine</p>
-                 <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-teal-400 rounded-full animate-pulse"></div><span className="text-teal-400 font-bold text-sm">12 Algorithms Running</span></div>
+                 <div className="flex items-center space-x-2"><div className="w-2 h-2 bg-teal-400 rounded-full animate-pulse"></div><span className="text-teal-400 font-bold text-sm">11 Algorithms Running</span></div>
               </div>
             </div>
 
@@ -616,14 +728,14 @@ export default function App() {
 
         {/* --- TAB 2: POS --- */}
         {activeTab === 'pos' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <div className="lg:col-span-7 flex flex-col gap-5">
               
-              {/* Trie + Bloom Search */}
+              {/* Trie Search */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm relative z-30">
                 <div className="flex items-center justify-between mb-2">
-                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center"><SearchCode className="w-3 h-3 mr-1"/> Bloom Filter + Trie Prefix Search</span>
-                   <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">O(1) &rarr; O(k)</span>
+                   <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center"><SearchCode className="w-3 h-3 mr-1"/> Trie Prefix Search</span>
+                   <span className="text-[10px] font-mono bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">O(k)</span>
                 </div>
                 <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 focus-within:border-teal-500 focus-within:ring-4 focus-within:ring-teal-500/10 transition-all">
                   <Search className="w-5 h-5 text-slate-400 mr-3" />
@@ -634,7 +746,7 @@ export default function App() {
                   />
                 </div>
                 {searchTerm.trim().length > 0 && (
-                  <div className="absolute left-0 right-0 top-[110%] mt-2 bg-white rounded-xl shadow-2xl border border-slate-200 max-h-72 overflow-y-auto divide-y divide-slate-100 overflow-hidden">
+                  <div className="absolute left-0 right-0 top-[110%] mt-2 bg-white rounded-xl shadow-2xl border border-slate-200 max-h-72 overflow-y-auto divide-y divide-slate-100">
                     {searchSuggestions.length > 0 ? searchSuggestions.map((med) => {
                       const totalStock = med.batches.reduce((acc, b) => acc + b.quantity, 0);
                       return (
@@ -649,7 +761,7 @@ export default function App() {
                           </div>
                         </div>
                       );
-                    }) : <div className="p-4 text-center text-sm font-semibold text-slate-500">Bloom Filter: Probably False. Trie: Not Found.</div>}
+                    }) : <div className="p-4 text-center text-sm font-semibold text-slate-500">Trie: No matching prefix found.</div>}
                   </div>
                 )}
               </div>
@@ -663,7 +775,7 @@ export default function App() {
                      </h3>
                      <span className="text-[9px] font-mono bg-indigo-50 text-indigo-500 border border-indigo-100 px-1.5 py-0.5 rounded">O(1)</span>
                   </div>
-                  <div className="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
+                  <div className="flex gap-3 overflow-x-auto pb-2">
                     {recentItems.map((med, idx) => (
                       <div key={med.id} onClick={() => handleAddToCart(med)} className="flex-shrink-0 cursor-pointer w-40 bg-indigo-50/50 border border-indigo-100 rounded-xl p-3 hover:bg-indigo-100 hover:shadow-md transition-all group">
                         <span className="text-[9px] font-black text-indigo-500 mb-1 block uppercase tracking-wider">{idx === 0 ? 'MRU (Head)' : `Pos: ${idx}`}</span>
@@ -679,15 +791,16 @@ export default function App() {
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex-1">
                 <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
                   <div className="flex flex-col">
-                     <h3 className="text-sm font-bold text-slate-900 flex items-center"><Package className="w-5 h-5 mr-2 text-teal-600" /> Inventory Catalog</h3>
-                     <p className="text-[10px] font-bold text-slate-400 mt-1">QuickSort Engine • O(N log N)</p>
+                    <h3 className="text-sm font-bold text-slate-900 flex items-center"><Package className="w-5 h-5 mr-2 text-teal-600" /> Inventory Catalog</h3>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">QuickSort Engine • O(N log N)</p>
                   </div>
                   <div className="flex space-x-2 bg-slate-100 p-1 rounded-lg">
+                    <button onClick={() => setShowAddMedicineModal(true)} className="text-[10px] font-bold bg-teal-600 text-white px-2 py-1 rounded shadow-sm hover:bg-teal-700 flex items-center"><Plus className="w-3 h-3 mr-1"/> Add Med</button>
                     <button onClick={() => handleSortInventory('price', true)} className="text-[10px] font-bold bg-white px-2 py-1 rounded shadow-sm hover:bg-slate-50 flex items-center"><ArrowUpDown className="w-3 h-3 mr-1 text-slate-400"/> Price</button>
                     <button onClick={() => handleSortInventory('name', true)} className="text-[10px] font-bold bg-white px-2 py-1 rounded shadow-sm hover:bg-slate-50 flex items-center"><ArrowUpDown className="w-3 h-3 mr-1 text-slate-400"/> Name</button>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 overflow-y-auto max-h-[460px] pr-1 custom-scrollbar">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 overflow-y-auto max-h-[460px] pr-1">
                   {inventory.map((med) => {
                     const totalQty = med.batches.reduce((sum, b) => sum + b.quantity, 0);
                     return (
@@ -726,7 +839,7 @@ export default function App() {
                     <Undo2 className="w-3.5 h-3.5 mr-1" /> Pop
                   </button>
                 </div>
-                <div className="flex-1 my-4 overflow-y-auto max-h-[400px] pr-2 space-y-3 custom-scrollbar">
+                <div className="flex-1 my-4 overflow-y-auto max-h-[400px] pr-2 space-y-3">
                   {cartStack.length > 0 ? [...cartStack].reverse().map((item, index) => (
                     <div key={item.cartId} className={`p-4 rounded-xl border flex items-center justify-between transition-all ${index === 0 ? 'border-amber-300 bg-amber-50 shadow-md' : 'border-slate-200 bg-white'}`}>
                       <div className="flex items-center space-x-3">
@@ -765,7 +878,7 @@ export default function App() {
 
         {/* --- TAB 3: PATIENTS (QUEUE + BST String Search + Hash Map) --- */}
         {activeTab === 'patients' && (
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
             {/* Queue Component O(1) */}
             <div className="lg:col-span-12 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col">
@@ -786,9 +899,9 @@ export default function App() {
                   </button>
                 </div>
               </div>
-              <div className="flex-1 flex gap-4 overflow-x-auto p-5 bg-slate-50/50 rounded-xl border border-slate-200 items-center min-h-[160px] custom-scrollbar">
+              <div className="flex-1 flex gap-4 overflow-x-auto p-5 bg-slate-50/50 rounded-xl border border-slate-200 items-center min-h-[160px]">
                 {patientQueue.length > 0 ? patientQueue.map((id, index) => {
-                  const p = hashMapRef.current.get(id) || patients.find(pat => pat.id === id); // Prefer Hash Map
+                  const p = hashMapRef.current.get(id) || patients.find(pat => pat.id === id);
                   return (
                     <div key={id} className={`flex-shrink-0 w-56 p-5 rounded-2xl border bg-white shadow-sm flex flex-col items-center text-center transition-all ${index === 0 ? 'border-blue-400 ring-4 ring-blue-500/10' : 'border-slate-200'}`}>
                       <div className={`text-[9px] font-black px-3 py-1 rounded-full mb-3 tracking-widest uppercase shadow-sm ${index === 0 ? 'bg-blue-600 text-white' : index === patientQueue.length - 1 ? 'bg-slate-800 text-white' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
@@ -837,7 +950,7 @@ export default function App() {
             </div>
 
             {/* BST In-Order Traversal */}
-            <div className="lg:col-span-6 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm max-h-[420px] overflow-y-auto custom-scrollbar">
+            <div className="lg:col-span-6 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm max-h-[420px] overflow-y-auto">
               <div className="flex items-center justify-between mb-5">
                 <div className="flex items-center space-x-3">
                     <div className="p-2 bg-indigo-100 text-indigo-600 rounded-lg"><GitMerge className="w-5 h-5" /></div>
@@ -868,7 +981,7 @@ export default function App() {
 
         {/* --- TAB 4: DOCTORS & DAG Rx --- */}
         {activeTab === 'doctors' && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             {/* Rx Workflow DAG */}
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col h-[500px]">
               <div className="flex items-center justify-between mb-5">
@@ -881,14 +994,14 @@ export default function App() {
                 </div>
                 <button onClick={() => setShowCreateRxModal(true)} className="px-4 py-2 bg-slate-900 text-white font-bold text-xs rounded-xl shadow-md hover:bg-slate-800 transition-colors">+ New Rx Node</button>
               </div>
-              <div className="flex-1 overflow-y-auto space-y-4 pr-2 custom-scrollbar">
+              <div className="flex-1 overflow-y-auto space-y-4 pr-2">
                 {prescriptions.length > 0 ? prescriptions.map(rx => (
                    <div key={rx.id} className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
                      <div className="flex justify-between items-center mb-3 border-b border-slate-200 pb-3">
-                       <span className="font-bold text-sm text-slate-900">{rx.id}</span>
+                       <span className="font-bold text-sm text-slate-900">{rx.id} • {rx.medName}</span>
                        <span className="text-[10px] font-black uppercase bg-white border border-slate-200 px-2 py-1 rounded text-slate-500">{rx.date}</span>
                      </div>
-                     <p className="text-sm font-semibold text-slate-700 mb-4">Patient: {rx.patientName}</p>
+                     <p className="text-xs font-semibold text-slate-700 mb-4">Patient: <span className="font-bold">{rx.patientName}</span> | Dr: <span className="font-bold">{rx.doctorName}</span></p>
                      
                      <div className="flex items-center justify-between relative">
                        <div className="absolute top-1/2 left-4 right-4 h-0.5 bg-slate-200 -z-10 -translate-y-1/2"></div>
@@ -918,20 +1031,23 @@ export default function App() {
 
             {/* Doctors */}
             <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm h-[500px] flex flex-col">
-              <div className="flex items-center space-x-3 mb-5">
-                  <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Stethoscope className="w-5 h-5" /></div>
-                  <div>
-                    <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Verified Doctors</h3>
-                    <p className="text-[10px] font-bold text-slate-500">Authorized Prescribers</p>
-                  </div>
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center space-x-3">
+                    <div className="p-2 bg-teal-100 text-teal-600 rounded-lg"><Stethoscope className="w-5 h-5" /></div>
+                    <div>
+                      <h3 className="text-sm font-black text-slate-900 uppercase tracking-wider">Verified Doctors</h3>
+                      <p className="text-[10px] font-bold text-slate-500">Authorized Prescribers</p>
+                    </div>
+                </div>
+                <button onClick={() => setShowAddDoctorModal(true)} className="px-4 py-2 bg-teal-600 text-white font-bold text-xs rounded-xl shadow-md hover:bg-teal-700 transition-colors">+ Add Doctor</button>
               </div>
-              <div className="space-y-4 overflow-y-auto pr-2 custom-scrollbar">
+              <div className="space-y-4 overflow-y-auto pr-2">
                 {doctors.map(doc => (
                   <div key={doc.id} className="border border-slate-200 rounded-2xl p-5 bg-white shadow-sm hover:shadow-md transition-all">
                     <div className="flex justify-between items-start mb-3">
                       <div>
                         <h4 className="font-bold text-slate-900 text-base flex items-center">{doc.name} {doc.certified && <BadgeCheck className="w-5 h-5 ml-1 text-emerald-500" />}</h4>
-                        <span className="text-xs text-teal-600 font-bold uppercase tracking-wider">{doc.specialty}</span>
+                        <span className="text-xs text-teal-600 font-bold uppercase tracking-wider">{doc.specialty} • {doc.qualification}</span>
                       </div>
                       <span className="text-[10px] font-mono bg-slate-50 border border-slate-200 text-slate-600 px-2 py-1 rounded font-bold shadow-sm">{doc.license}</span>
                     </div>
@@ -943,39 +1059,49 @@ export default function App() {
           </div>
         )}
 
-        {/* --- TAB 5: DS VISUALIZER (ALL 12 DATA STRUCTURES) --- */}
+        {/* --- TAB 5: DS VISUALIZER --- */}
         {activeTab === 'ds_inspector' && (
-          <div className="bg-[#0f172a] rounded-3xl p-8 shadow-2xl flex flex-col gap-10 animate-in fade-in zoom-in-95 duration-300 border border-slate-800">
+          <div className="bg-[#0f172a] rounded-3xl p-8 shadow-2xl flex flex-col gap-10 border border-slate-800">
             <div className="flex items-center justify-between border-b border-slate-800 pb-5">
               <div>
                 <h3 className="text-xl font-black text-white flex items-center tracking-tight"><SearchCode className="w-6 h-6 mr-3 text-teal-400" /> Advanced DS Visualizer Hub</h3>
-                <p className="text-xs text-slate-400 mt-1 font-mono uppercase tracking-widest">Real-time state representations of 12 algorithms</p>
+                <p className="text-xs text-slate-400 mt-1 font-mono uppercase tracking-widest">Real-time state representations of integrated algorithms</p>
               </div>
               <div className="text-right hidden sm:block">
-                 <div className="text-3xl font-black text-teal-400">12</div>
+                 <div className="text-3xl font-black text-teal-400">11</div>
                  <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Data Structures</div>
               </div>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
               
-              {/* 1. Bloom Filter Visualizer */}
+              {/* 1. Graph Visualizer */}
               <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50">
-                <h4 className="text-xs font-black text-blue-400 mb-3 uppercase tracking-widest">1. Bloom Filter (Bit Array)</h4>
-                <div className="flex flex-wrap gap-1">
-                  {bloomRef.current.bitArray.slice(0, 100).map((bit, i) => (
-                    <div key={i} className={`w-3 h-3 rounded-sm ${bit === 1 ? 'bg-blue-500' : 'bg-slate-700'}`}></div>
-                  ))}
+                <h4 className="text-xs font-black text-rose-400 mb-3 uppercase tracking-widest">1. Graph (Drug Interactions)</h4>
+                <div className="flex flex-col gap-2 overflow-y-auto max-h-[150px] pb-2">
+                  {Array.from(graphRef.current.adjList.keys()).map(nodeId => {
+                    const edges = graphRef.current.adjList.get(nodeId);
+                    if (!edges || edges.length === 0) return null;
+                    return (
+                      <div key={nodeId} className="flex items-center text-xs font-mono text-slate-300">
+                        <span className="bg-rose-900/50 border border-rose-500 text-rose-200 px-2 py-1 rounded">{nodeId}</span>
+                        <span className="mx-2 text-rose-500">&harr;</span>
+                        <div className="flex gap-1 flex-wrap">
+                          {edges.map(edge => <span key={edge} className="bg-slate-800 border border-slate-600 px-2 py-1 rounded">{edge}</span>)}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-                <p className="text-[10px] text-slate-500 mt-2 font-mono">Probabilistic lookup. {bloomRef.current.bitArray.filter(b=>b===1).length}/200 bits set.</p>
+                <p className="text-[10px] text-slate-500 mt-2 font-mono">Adjacency List O(V+E) - Blocks harmful Rx combinations.</p>
               </div>
 
               {/* 2. Hash Map Visualizer */}
               <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50">
                 <h4 className="text-xs font-black text-fuchsia-400 mb-3 uppercase tracking-widest">2. Hash Map (Separate Chaining)</h4>
-                <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2 min-h-[60px]">
+                <div className="flex gap-2 overflow-x-auto pb-2 min-h-[60px]">
                    {hashMapRef.current.buckets.map((bucket, idx) => {
-                     if(bucket.length === 0 && idx > 15) return null; // hide empty to save space
+                     if(bucket.length === 0 && idx > 15) return null;
                      return (
                        <div key={idx} className={`shrink-0 w-16 h-16 rounded-xl border flex flex-col items-center justify-center font-mono text-[9px] ${bucket.length > 0 ? 'bg-fuchsia-900/30 border-fuchsia-500 text-fuchsia-300' : 'bg-slate-800/50 border-slate-700 text-slate-500'}`}>
                          <span>Bkt {idx}</span>
@@ -988,38 +1114,31 @@ export default function App() {
               </div>
 
               {/* 3. Trie Tree Visualizer */}
-              <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50">
-                <h4 className="text-xs font-black text-teal-400 mb-3 uppercase tracking-widest">3. Trie Prefix Tree</h4>
-                <div className="flex items-center text-slate-300 text-sm font-mono overflow-x-auto">
-                   <div className="p-2 border border-teal-500/30 bg-teal-900/20 rounded-lg">root</div>
-                   <div className="mx-2 text-teal-600">&rarr;</div>
-                   <div className="p-2 border border-teal-500/30 bg-teal-900/20 rounded-lg">a</div>
-                   <div className="mx-2 text-teal-600">&rarr;</div>
-                   <div className="p-2 border border-teal-500/30 bg-teal-900/20 rounded-lg">m</div>
-                   <div className="mx-2 text-teal-600">&rarr;</div>
-                   <div className="p-2 border border-teal-500 bg-teal-600 text-white rounded-lg shadow-lg shadow-teal-500/20">*amoxicillin</div>
+              <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-xs font-black text-teal-400 uppercase tracking-widest">3. Full Trie Prefix Tree</h4>
+                  <span className="text-[10px] font-mono bg-slate-800 text-teal-300 px-2 py-1 rounded border border-teal-900/50">O(k) Search</span>
                 </div>
-                <p className="text-[10px] text-slate-500 mt-3 font-mono">O(k) where k is prefix length.</p>
+                <div className="bg-[#0b1120] p-4 rounded-xl border border-slate-700/50 overflow-auto h-[250px] shadow-inner">
+                  {renderTrieNode(trieRef.current.root)}
+                </div>
               </div>
 
               {/* 4. Min-Heap Visualizer */}
-              <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 flex flex-col items-center">
-                <h4 className="text-xs font-black text-rose-400 mb-3 uppercase tracking-widest w-full text-left">4. FEFO Min-Heap Array (Binary Tree)</h4>
-                <div className="w-10 h-10 rounded-full bg-rose-900 border border-rose-500 flex items-center justify-center text-xs font-black text-white mb-2">0</div>
-                <div className="flex w-32 justify-between">
-                   <div className="w-px h-6 bg-rose-500/50 -rotate-45 transform translate-x-4"></div>
-                   <div className="w-px h-6 bg-rose-500/50 rotate-45 transform -translate-x-4"></div>
+              <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                  <h4 className="text-xs font-black text-rose-400 uppercase tracking-widest">4. FEFO Min-Heap (Array to Tree)</h4>
+                  <span className="text-[10px] font-mono bg-slate-800 text-rose-300 px-2 py-1 rounded border border-rose-900/50">O(log N) Priority</span>
                 </div>
-                <div className="flex w-32 justify-between">
-                   <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xs font-black text-slate-400">1</div>
-                   <div className="w-10 h-10 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center text-xs font-black text-slate-400">2</div>
+                <div className="bg-[#0b1120] p-4 rounded-xl border border-slate-700/50 overflow-auto h-[250px] shadow-inner">
+                  {globalHeap.length > 0 ? renderHeapNode(globalHeap) : <div className="text-slate-500 text-xs text-center mt-10">Heap Empty</div>}
                 </div>
               </div>
 
               {/* 5. LRU Cache Visualizer */}
               <div className="bg-slate-800/40 p-5 rounded-2xl border border-slate-700/50 lg:col-span-2">
                 <h4 className="text-xs font-black text-indigo-400 mb-3 uppercase tracking-widest">5. LRU Cache (Doubly Linked List)</h4>
-                <div className="flex items-center space-x-2 overflow-x-auto min-h-[100px] custom-scrollbar pb-2">
+                <div className="flex items-center space-x-2 overflow-x-auto min-h-[100px] pb-2">
                   {recentItems.length > 0 ? (
                     <>
                       <div className="w-14 h-14 shrink-0 rounded-xl border-2 border-slate-600 border-dashed flex flex-col items-center justify-center text-slate-500 font-black text-[9px] bg-slate-800/80">HEAD</div>
@@ -1045,7 +1164,7 @@ export default function App() {
                    <h4 className="text-xs font-black text-emerald-400 uppercase tracking-widest">6. Binary Search Tree (String Lexicography)</h4>
                    <span className="text-[10px] font-mono bg-slate-800 text-emerald-300 px-2 py-1 rounded border border-emerald-900/50">Nodes: {bstInOrder.length}</span>
                 </div>
-                <div className="bg-[#0b1120] p-4 rounded-xl border border-slate-700/50 overflow-x-auto min-h-[200px] custom-scrollbar shadow-inner">
+                <div className="bg-[#0b1120] p-4 rounded-xl border border-slate-700/50 overflow-x-auto min-h-[200px] shadow-inner">
                   {bstRef.current.root ? renderBstNode(bstRef.current.root) : <div className="text-slate-500 text-xs font-semibold w-full text-center mt-10">Tree Empty. Add patients to build.</div>}
                 </div>
               </div>
@@ -1056,7 +1175,7 @@ export default function App() {
       </main>
 
       {/* --- DS INSPECTOR CONSOLE (Ring Buffer Logs) --- */}
-      <div className="bg-[#0b1120] text-slate-300 p-4 shrink-0 border-t border-slate-800 relative z-50">
+      <div className="bg-[#0b1120] text-slate-300 p-4 shrink-0 border-t border-slate-800 relative z-40">
         <div className="max-w-7xl mx-auto flex flex-col">
           <div className="flex justify-between items-center mb-3">
              <h3 className="text-[11px] font-black text-white uppercase tracking-widest flex items-center">
@@ -1064,7 +1183,7 @@ export default function App() {
              </h3>
              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider bg-slate-800 border border-slate-700 px-2 py-1 rounded shadow-inner">O(1) Circular Insertion</span>
           </div>
-          <div className="h-40 overflow-y-auto space-y-1.5 pr-2 font-mono text-[10px] custom-scrollbar">
+          <div className="h-40 overflow-y-auto space-y-1.5 pr-2 font-mono text-[10px]">
             {dsLogs.length > 0 ? dsLogs.map((log) => (
               <div key={log.id} className="flex items-start space-x-3 bg-slate-800/40 hover:bg-slate-800 p-2 rounded transition-colors border border-slate-700/50">
                 <span className="text-slate-400 shrink-0 bg-slate-900 px-1.5 rounded">{log.time}</span>
@@ -1079,7 +1198,7 @@ export default function App() {
 
       {/* MODALS */}
       {showAddPatientModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-slate-200">
             <h3 className="text-lg font-black mb-6 text-slate-900 flex items-center"><UserPlus className="w-5 h-5 mr-2 text-blue-600"/> Register & Enqueue Patient</h3>
             <form onSubmit={handleRegisterPatient} className="space-y-4">
@@ -1108,7 +1227,7 @@ export default function App() {
               </div>
               <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100">
                 <button type="button" onClick={() => setShowAddPatientModal(false)} className="px-5 py-2.5 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
-                <button type="submit" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black shadow-md hover:bg-blue-700 transition-colors">Register</button>
+                <button type="submit" className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black shadow-md hover:bg-blue-700 transition-colors">Enqueue Patient</button>
               </div>
             </form>
           </div>
@@ -1116,22 +1235,29 @@ export default function App() {
       )}
 
       {showCreateRxModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-slate-200">
-            <h3 className="text-lg font-black mb-6 text-slate-900 flex items-center"><FileText className="w-5 h-5 mr-2 text-teal-600"/> Init Rx Workflow (DAG)</h3>
+            <h3 className="text-lg font-black mb-6 text-slate-900 flex items-center"><Workflow className="w-5 h-5 mr-2 text-rose-600"/> Create Digital Prescription</h3>
             <form onSubmit={handleCreatePrescription} className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Patient</label>
-                <select required value={newRx.patientId} onChange={e => setNewRx({...newRx, patientId: e.target.value})} className="mt-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all">
-                  <option value="">-- Choose --</option>
+                <select required value={newRx.patientId} onChange={e => setNewRx({...newRx, patientId: e.target.value})} className="mt-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold">
+                  <option value="">-- Choose Patient --</option>
                   {patients.map(p => <option key={p.id} value={p.id}>{p.name} ({p.id})</option>)}
                 </select>
               </div>
               <div>
-                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Medicine</label>
-                <select required value={newRx.medId} onChange={e => setNewRx({...newRx, medId: e.target.value})} className="mt-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all">
-                  <option value="">-- Choose --</option>
-                  {inventory.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Prescribing Doctor</label>
+                <select required value={newRx.doctorId} onChange={e => setNewRx({...newRx, doctorId: e.target.value})} className="mt-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold">
+                  <option value="">-- Choose Doctor --</option>
+                  {doctors.map(d => <option key={d.id} value={d.id}>{d.name} ({d.specialty})</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Medicine (Graph Interaction Checked)</label>
+                <select required value={newRx.medId} onChange={e => setNewRx({...newRx, medId: e.target.value})} className="mt-1 w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold">
+                  <option value="">-- Choose Medicine --</option>
+                  {inventory.map(m => <option key={m.id} value={m.id}>{m.name} ({m.id})</option>)}
                 </select>
               </div>
               <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100">
@@ -1143,43 +1269,90 @@ export default function App() {
         </div>
       )}
 
-      {substituteModal && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in zoom-in-95 duration-200">
-          <div className="bg-white rounded-3xl w-full max-w-lg p-8 shadow-2xl border-2 border-rose-100 relative overflow-hidden">
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Hexagon className="w-32 h-32 text-rose-500" /></div>
-            <div className="flex items-center space-x-3 mb-4 text-rose-600 relative z-10">
-              <Network className="w-6 h-6" />
-              <h3 className="text-lg font-black tracking-tight">Graph Edge Substitution</h3>
-            </div>
-            <p className="text-sm font-medium text-slate-600 mb-6 bg-rose-50 p-4 rounded-xl border border-rose-100 relative z-10">
-              <b className="text-rose-900">{substituteModal.name}</b> is out of stock. Traversing Adjacency List for active salt chemical node <b className="text-slate-900 bg-white px-1.5 py-0.5 rounded shadow-sm inline-block mt-1 font-mono text-xs border border-rose-200">{substituteModal.activeSalt}</b>...
-            </p>
-            <div className="space-y-3 max-h-60 overflow-y-auto custom-scrollbar pr-2 relative z-10">
-              {genericGraphData[substituteModal.activeSalt].filter(m => m.id !== substituteModal.id && m.batches.reduce((sum,b)=>sum+b.quantity,0) > 0).length > 0 ? (
-                 genericGraphData[substituteModal.activeSalt].filter(m => m.id !== substituteModal.id && m.batches.reduce((sum,b)=>sum+b.quantity,0) > 0).map(sub => (
-                    <div key={sub.id} className="flex justify-between items-center p-4 bg-teal-50/80 rounded-2xl border border-teal-100 hover:border-teal-300 hover:shadow-md transition-all group backdrop-blur-sm">
-                      <div>
-                        <h4 className="font-bold text-sm text-slate-900 group-hover:text-teal-700 transition-colors">{sub.name}</h4>
-                        <p className="text-xs font-bold text-teal-600 mt-1">₹{sub.price.toFixed(2)}</p>
-                      </div>
-                      <button onClick={() => { handleAddToCart(sub); setSubstituteModal(null); }} className="px-4 py-2 bg-teal-600 text-white text-xs rounded-xl font-bold shadow-sm hover:bg-teal-700 transition-colors">Add Alternate</button>
-                    </div>
-                ))
-              ) : (
-                <div className="text-center text-sm font-bold text-slate-500 py-6 border-2 border-dashed border-rose-200 rounded-xl bg-rose-50/50">No generic substitute nodes available in Graph.</div>
-              )}
-            </div>
-            <button onClick={() => setSubstituteModal(null)} className="mt-6 w-full px-5 py-3 bg-slate-100 rounded-xl text-sm font-black text-slate-600 hover:bg-slate-200 transition-colors relative z-10">Close Adjacency Map</button>
+      {showAddMedicineModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-black mb-6 text-slate-900 flex items-center"><Pill className="w-5 h-5 mr-2 text-teal-600"/> Add New Medicine</h3>
+            <form onSubmit={handleAddMedicine} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Medicine Name</label>
+                <input type="text" required value={newMedicineForm.name} onChange={e => setNewMedicineForm({...newMedicineForm, name: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Category</label>
+                  <input type="text" required value={newMedicineForm.category} onChange={e => setNewMedicineForm({...newMedicineForm, category: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Active Salt</label>
+                  <input type="text" required value={newMedicineForm.activeSalt} onChange={e => setNewMedicineForm({...newMedicineForm, activeSalt: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Price (₹)</label>
+                  <input type="number" step="0.01" required value={newMedicineForm.price} onChange={e => setNewMedicineForm({...newMedicineForm, price: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Initial Quantity</label>
+                  <input type="number" required value={newMedicineForm.quantity} onChange={e => setNewMedicineForm({...newMedicineForm, quantity: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Batch ID</label>
+                  <input type="text" required value={newMedicineForm.batchId} onChange={e => setNewMedicineForm({...newMedicineForm, batchId: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Expiry Date</label>
+                  <input type="date" required value={newMedicineForm.expiryDate} onChange={e => setNewMedicineForm({...newMedicineForm, expiryDate: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-teal-500/20 focus:border-teal-500 transition-all" />
+                </div>
+              </div>
+              <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100">
+                <button type="button" onClick={() => setShowAddMedicineModal(false)} className="px-5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-teal-600 text-white rounded-xl text-sm font-black shadow-md hover:bg-teal-700 transition-colors">Add Medicine</button>
+              </div>
+            </form>
           </div>
         </div>
       )}
-      
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.4); border-radius: 10px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.7); }
-      `}} />
+
+      {showAddDoctorModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-md p-8 shadow-2xl border border-slate-200">
+            <h3 className="text-lg font-black mb-6 text-slate-900 flex items-center"><Stethoscope className="w-5 h-5 mr-2 text-blue-600"/> Add Verified Doctor</h3>
+            <form onSubmit={handleAddDoctor} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Doctor Name</label>
+                <input type="text" required value={newDoctorForm.name} onChange={e => setNewDoctorForm({...newDoctorForm, name: e.target.value})} placeholder="e.g. Dr. Ramesh Kumar" className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Specialty</label>
+                  <input type="text" required value={newDoctorForm.specialty} onChange={e => setNewDoctorForm({...newDoctorForm, specialty: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Qualification</label>
+                  <input type="text" required value={newDoctorForm.qualification} onChange={e => setNewDoctorForm({...newDoctorForm, qualification: e.target.value})} placeholder="e.g. MBBS, MD" className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Medical License No.</label>
+                <input type="text" required value={newDoctorForm.license} onChange={e => setNewDoctorForm({...newDoctorForm, license: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Hospital Affiliation</label>
+                <input type="text" required value={newDoctorForm.hospital} onChange={e => setNewDoctorForm({...newDoctorForm, hospital: e.target.value})} className="mt-1 w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all" />
+              </div>
+              <div className="pt-4 flex justify-end space-x-3 border-t border-slate-100">
+                <button type="button" onClick={() => setShowAddDoctorModal(false)} className="px-5 py-2 bg-white border border-slate-200 rounded-xl text-sm font-bold text-slate-600 hover:bg-slate-50 transition-colors">Cancel</button>
+                <button type="submit" className="px-5 py-2 bg-blue-600 text-white rounded-xl text-sm font-black shadow-md hover:bg-blue-700 transition-colors">Add Doctor</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
